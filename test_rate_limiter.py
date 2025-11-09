@@ -41,6 +41,10 @@ class TestTokenBucketRateLimiter(unittest.TestCase):
             TokenBucketRateLimiter(rate=10, capacity=0)
         with self.assertRaises(ValueError):
             TokenBucketRateLimiter(rate=10, capacity=-5)
+        with self.assertRaises(ValueError):
+            TokenBucketRateLimiter(rate=10, capacity=0.5)
+        with self.assertRaises(ValueError):
+            TokenBucketRateLimiter(rate=0.5, capacity=0.9)
     
     def test_allow_request_basic(self):
         """Test basic allow_request functionality."""
@@ -231,6 +235,102 @@ class TestTokenBucketRateLimiter(unittest.TestCase):
                               f"Expected ~20 requests, got {allowed_count}")
         self.assertLessEqual(allowed_count, 22, 
                            f"Expected ~20 requests, got {allowed_count}")
+    
+    def test_rate_limiter_size_one(self):
+        """Test edge case: rate limiter with rate=1, capacity=1."""
+        limiter = TokenBucketRateLimiter(rate=1, capacity=1)
+        
+        # First request should be allowed
+        self.assertTrue(limiter.allow_request())
+        
+        # Second immediate request should be denied
+        self.assertFalse(limiter.allow_request())
+        
+        # Wait for 1 second to refill
+        time.sleep(1.0)
+        
+        # Should allow one more request
+        self.assertTrue(limiter.allow_request())
+        
+        # Immediate request should be denied again
+        self.assertFalse(limiter.allow_request())
+    
+    def test_fractional_rate(self):
+        """Test edge case: fractional rate (e.g., 0.5 requests per second)."""
+        limiter = TokenBucketRateLimiter(rate=0.5, capacity=1)
+        
+        # First request should be allowed
+        self.assertTrue(limiter.allow_request())
+        
+        # Second immediate request should be denied
+        self.assertFalse(limiter.allow_request())
+        
+        # Wait 2 seconds to refill 1 token
+        time.sleep(2.0)
+        
+        # Should allow one more request
+        self.assertTrue(limiter.allow_request())
+    
+    def test_capacity_less_than_rate(self):
+        """Test edge case: capacity < rate (slow burst, fast refill)."""
+        limiter = TokenBucketRateLimiter(rate=10, capacity=2)
+        
+        # Should allow 2 requests immediately (capacity limit)
+        self.assertTrue(limiter.allow_request())
+        self.assertTrue(limiter.allow_request())
+        
+        # Third request should be denied
+        self.assertFalse(limiter.allow_request())
+        
+        # Wait 0.5 seconds (refills 5 tokens, capped at 2)
+        time.sleep(0.5)
+        
+        # Should allow up to 2 more requests
+        allowed = sum(1 for _ in range(5) if limiter.allow_request())
+        self.assertEqual(allowed, 2)
+    
+    def test_capacity_greater_than_rate(self):
+        """Test edge case: capacity > rate (large burst, slow refill)."""
+        limiter = TokenBucketRateLimiter(rate=2, capacity=10)
+        
+        # Should allow 10 requests immediately (capacity limit)
+        for i in range(10):
+            self.assertTrue(limiter.allow_request(), 
+                          f"Request {i+1} should be allowed")
+        
+        # 11th request should be denied
+        self.assertFalse(limiter.allow_request())
+        
+        # Wait 1 second (refills 2 tokens)
+        time.sleep(1.0)
+        
+        # Should allow 2 more requests
+        allowed = sum(1 for _ in range(5) if limiter.allow_request())
+        self.assertEqual(allowed, 2)
+    
+    def test_very_large_rate(self):
+        """Test edge case: very large rate."""
+        limiter = TokenBucketRateLimiter(rate=1000, capacity=1000)
+        
+        # Should handle 1000 immediate requests
+        allowed = sum(1 for _ in range(1000) if limiter.allow_request())
+        self.assertEqual(allowed, 1000)
+        
+        # 1001st request should be denied
+        self.assertFalse(limiter.allow_request())
+    
+    def test_minimum_valid_capacity(self):
+        """Test edge case: minimum valid capacity of 1.0."""
+        limiter = TokenBucketRateLimiter(rate=1, capacity=1.0)
+        
+        # Should allow exactly 1 request
+        self.assertTrue(limiter.allow_request())
+        self.assertFalse(limiter.allow_request())
+        
+        # Test with fractional rate but valid capacity
+        limiter2 = TokenBucketRateLimiter(rate=0.1, capacity=1.0)
+        self.assertTrue(limiter2.allow_request())
+        self.assertFalse(limiter2.allow_request())
 
 
 if __name__ == '__main__':

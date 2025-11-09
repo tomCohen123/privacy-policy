@@ -48,6 +48,9 @@ class TokenBucketRateLimiter:
         if self.capacity <= 0:
             raise ValueError("Capacity must be positive")
         
+        if self.capacity < 1.0:
+            raise ValueError("Capacity must be at least 1.0 (each request consumes 1 token)")
+        
         # Start with a full bucket
         self.tokens = float(self.capacity)
         self.last_refill_time = time.time()
